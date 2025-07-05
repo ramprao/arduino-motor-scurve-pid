@@ -44,7 +44,7 @@ double Kp=1000, Ki=0, Kd=100; // 500, 1000, 13 // 1000, 0, 100
 ArduPID myController;
 
 //Encoder
-Encoder myEnc(21, 20); // Intreuppts on Mega
+Encoder myEnc(21, 20); // Interrupts on Mega
 
 DCMotor motor = DCMotor(2, 4, 8); // 2,4 to IN1 and IN2 of L293N and 8 = PWM
 
