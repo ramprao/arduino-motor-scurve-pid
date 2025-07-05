@@ -4,6 +4,11 @@ Book: Trajectory Planning for Automatic Machines and Robots --
 Authors: Luigi Biagiotti · Claudio Melchiorri
 Section: 3.2.2 Trajectory with preassigned acceleration and velocity
 Eqns: 3.8, 3.9, 3.10
+
+Hardware -- 
+1. Motor with encoder https://www.amazon.com/dp/B07GNGQ24C?th=1
+2. Driver L293N https://www.amazon.com/dp/B0CLYBPGP9
+3. Arduino Mega 2560
 */
 
 #include <LibPrintf.h> //https://github.com/embeddedartistry/arduino-printf
