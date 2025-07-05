@@ -17,6 +17,7 @@ Hardware --
 #include <ArduPID.h>   //https://github.com/PowerBroker2/ArduPID
 
 #define ENCODER_DO_NOT_USE_INTERRUPTS
+// Stops motor and PID controller upon reaching DEADBAND
 #ifndef  ENCODER_DO_NOT_USE_INTERRUPTS
 float DEADBAND = 30;
 #else
