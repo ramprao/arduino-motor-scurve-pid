@@ -33,21 +33,29 @@ float DEADBAND = 10;
 // Some move commands
 // pa 20000 moves 20000 counts absolute
 // pr -123 moves -123 counts relative to current encoder reading
-#define COM_MOVE_POS "^(p[ar]) (-?%d+)$"   // sets low pwmspeeds
-#define COM_JOG "^jog (-?%d+) (%d+)$"   // sets low pwmspeeds
-#define COM_STOP "^stop$"   // sets low pwmspeeds
+#define COM_MOVE_POS "^(p[ar]) ([abc]) (-?%d+)$"   // sets low pwmspeeds
+#define COM_JOG "^jog ([abc]) (-?%d+) (%d+)$"   // sets low pwmspeeds
+#define COM_STOP "^stop ([abc])$"   // sets low pwmspeeds
+// Use if multiple motors/encoder/controllers
+int8_t axis; // A= 1; B=2; C=3 etc
 
-//Define Variables we'll be connecting to
+
+//Define Variables we'll be connecting to for PID control
 double Setpoint, Input, Output;
 //Specify the links and initial tuning parameters
-double Kp=1000, Ki=0, Kd=100; // 500, 1000, 13 // 1000, 0, 100
-
-ArduPID myController;
+double KpA=0.05, KiA=0, KdA=0.005; // 500, 1000, 13 // 1000, 0, 100
+double KpB=0.05, KiB=0, KdB=0.005; // 500, 1000, 13 // 1000, 0, 100
+ArduPID ControllerA;
+ArduPID ControllerB;
 
 //Encoder
-Encoder myEnc(21, 20); // Interrupts on Mega
+Encoder EncA(21, 20); // Interrupts on Mega
+Encoder EncB(21, 20); // Interrupts on Mega
 
-DCMotor motor = DCMotor(2, 4, 8); // 2,4 to IN1 and IN2 of L293N and 8 = PWM
+// Motors
+DCMotor motorA = DCMotor(2, 4, 8); // 2,4 to IN1 and IN2 of L293N and 8 = PWM
+DCMotor motorB = DCMotor(2, 4, 8); // 2,4 to IN1 and IN2 of L293N and 8 = PWM
+
 
 // input buffer and RegExp match state for processing client input
 char inBuffer[BUFFER_LENGTH];
@@ -62,7 +70,8 @@ void setup() {
   ct2 = millis();
   printf("Starting\n");
   //Setup the PID Loop
-  myController.begin(&Input, &Output, &Setpoint, Kp, Ki, Kd);
+  axis = 0;
+  setup_controllers();
 }
 
 void loop() {
@@ -74,11 +83,20 @@ void loop() {
   // Keep printing encoder pos every second while waiting for input
   if (millis() - ct2 > 1000) {
   //printf("Waiting for input. Encoder = %f\n",Input);
-  printf("%d %d\n", int(Setpoint), int(Setpoint) - myEnc.read());
+  printf("%d %d\n", int(Setpoint), int(Setpoint) - enc_read(axis));
   ct2 = millis();
   }
+}
 
+void setup_controllers() {
+  // Starting PID controller
+  ControllerA.begin(&Input, &Output, &Setpoint, KpA, KiA, KdA);
+  ControllerA.setSampleTime(1);      // OPTIONAL - will ensure at least 10ms have past between successful compute() calls
+  ControllerA.setOutputLimits(-255, 255);
 
+  ControllerB.begin(&Input, &Output, &Setpoint, KpB, KiB, KdB);
+  ControllerB.setSampleTime(1);      // OPTIONAL - will ensure at least 10ms have past between successful compute() calls
+  ControllerB.setOutputLimits(-255, 255);
 }
 
 void get_pos() 
@@ -93,11 +111,17 @@ void get_pos()
   //printf("s = %s\n",s);
   if(strcmp(s,"pa") == 0) absmove = 1;
 
-  newpos = float(atoi(ms.GetCapture(inBuffer, 1)));
+  axis = 0;
+  char *ax = ms.GetCapture(inBuffer, 1);
+  get_axis(ax, &axis);
+  if (axis == 0) {
+    printf("Invalid Axis\n");
+    return;
+  }
+
+  newpos = float(atoi(ms.GetCapture(inBuffer, 2)));
   //printf("newpos = %f\n",newpos);
-
-  q0 = float(myEnc.read());
-
+  q0 = float(enc_read(axis));
   if(absmove>0) {
     q1 = newpos;
   }
@@ -109,13 +133,13 @@ void get_pos()
   do_pos(q0, q1);
   // Sometimes doesn't reach. So try again after delay.
   delay(100);
-  q0 = float(myEnc.read());
+  q0 = float(enc_read(axis));
   if(abs(q1-q0) > 25) do_pos(q0, q1);
 
   // If not using interrupts it needs another try. 
   #ifdef  ENCODER_DO_NOT_USE_INTERRUPTS
   delay(100);
-  q0 = float(myEnc.read());
+  q0 = float(enc_read(axis));
   if(abs(q1-q0) > 25) do_pos(q0, q1);
   #endif
 
@@ -130,7 +154,6 @@ uint8_t traj_type(float v_m, float a_m, float h) {
       return 0; // Triangle
     }
   }
-
 
 // Determine Total and Acceleration time for the trajectory
 void traj_time(float q0, float q1, float v_m, float a_m, float *T, float *T_a) {
@@ -147,6 +170,7 @@ void traj_time(float q0, float q1, float v_m, float a_m, float *T, float *T_a) {
   }
 }
 
+// Trajectory calculation
 double pos_calc(float t, float q0, float q1, float T, float Ta, float v_m, float a_m) {
   float h = abs(q1 - q0);
   uint8_t is_trap = traj_type(v_m, a_m, h);
@@ -178,8 +202,11 @@ double pos_calc(float t, float q0, float q1, float T, float Ta, float v_m, float
   }
 }
 
-
-
+// Setup min outputs to MIN_PWM_SPEED
+void set_minoutput(double *Output) {
+  if ((*Output <0) && (*Output > -MIN_PWM_SPEED)) *Output = -MIN_PWM_SPEED; //-40
+  if ((*Output >0) && (*Output < MIN_PWM_SPEED)) *Output = MIN_PWM_SPEED;     //40
+}
 
 // Moves to requested position via PID control
 void do_pos(float q0, float q1) {
@@ -196,14 +223,7 @@ void do_pos(float q0, float q1) {
 
   //printf("trap = %d\n", trap);
 
-  // Starting PID controller
-  //myController.reset(); 
-  //myController.reverse()               // Uncomment if controller output is "reversed"
-  myController.setSampleTime(1);      // OPTIONAL - will ensure at least 10ms have past between successful compute() calls
-  myController.setOutputLimits(-255, 255);
-  //myController.setBias(255.0 / 2.0);
-  //myController.setWindUpLimits(-10, 10); // Groth bounds for the integral term to prevent integral wind-up
-  myController.start();
+  controller_start(axis);
 
   // Computes T, Ta returned as pointers
   traj_time(q0, q1, v_m, a_m, &T, &T_a);
@@ -219,69 +239,166 @@ void do_pos(float q0, float q1) {
 
     long curr_time = millis();
     while ( millis() - curr_time < int(1000*deltaT)) {
-      Input = float(myEnc.read());
-      myController.compute();
-      if ((Output <0) && (Output > -MIN_PWM_SPEED)) Output = -MIN_PWM_SPEED; //-40
-      if ((Output >0) && (Output < MIN_PWM_SPEED)) Output = MIN_PWM_SPEED;     //40
-      if(prevOutput*Output < 0) {motor.off();}; // stop if sign changes
-      motor.on(Output);
+      Input = float(enc_read(axis));
+      controller_compute(axis);
+      set_minoutput(&Output);
+      if(prevOutput*Output < 0) {motor_off(axis);}; // stop if sign changes
+      motor_on(axis, Output);
       prevOutput = Output;
     }
-    Input = float(myEnc.read());
+    Input = float(enc_read(axis));
   }
   // S curve is finished
   //printf("First round %f %f %f %f\n", t, Setpoint, Input, Output);
 
   //Final Point PID Loop 
-  Input = float(myEnc.read());
+  Input = float(enc_read(axis));
   long error = Input - Setpoint;
   long curr_time = millis();
   while ((millis() - curr_time < TIMEOUT)) { 
-    myController.compute();
-    if ((Output <0) && (Output > -MIN_PWM_SPEED)) Output = -float(MIN_PWM_SPEED);   
-    if ((Output >0) && (Output < MIN_PWM_SPEED)) Output = (MIN_PWM_SPEED);     
-    if(prevOutput*Output < 0) {motor.off();}; // stop if sign changes
-    motor.on(Output);
+    controller_compute(axis);
+    set_minoutput(&Output);    
+    if(prevOutput*Output < 0) {motor_off(axis);}; // stop if sign changes
+    motor_on(axis, Output);
     prevOutput = Output;
-    Input = float(myEnc.read());
+    Input = float(enc_read(axis));
     error = Input - Setpoint;
     if (abs(error) < DEADBAND) { 
-      motor.off() ;
+      motor_off(axis) ;
       break;
     } 
   }
 
-  motor.off();
+  motor_off(axis);
   delay(100);
   //printf("Elapsed time = %lu\n",millis()-start_time);
-  Input = float(myEnc.read());
+  Input = float(enc_read(axis));
   //if(abs(q1 - Input) < 20) {motor.off();}
   //printf("Final %f %f %f\n", t, Setpoint, Input);
-  myController.stop();
-
+  controller_stop(axis);
 }
 
 // Jogs for specified time at specified speed
 void jog() {
-  int speed = atoi(ms.GetCapture(inBuffer, 0));
-  int tms = atoi(ms.GetCapture(inBuffer, 1));
+  axis = 0;
+  char *ax = ms.GetCapture(inBuffer, 0);
+  get_axis(ax, &axis);
+  if (axis == 0) {
+    printf("Invalid Axis\n");
+    return;
+  }
 
-  float stEnc = float(myEnc.read());
+  int speed = atoi(ms.GetCapture(inBuffer, 1));
+  int tms = atoi(ms.GetCapture(inBuffer, 2));
+
+  float stEnc = float(enc_read(axis));
   printf("speed, time, start_enc = %d, %d, %f\n",speed, tms, stEnc);
-  motor.on(speed);
+  motor_on(axis, speed);
   long start_time = millis();
   while (millis() - start_time < tms) {
-   myEnc.read();
+   enc_read(axis);
   }
-  motor.off();
+  motor_off(axis);
   delay(100);
-  printf("speed, time, Difference Encoder = %d, %d, %f\n",speed, tms,float(myEnc.read())-stEnc);
+  printf("speed, time, Difference Encoder = %d, %d, %f\n",speed, tms,float(enc_read(axis))-stEnc);
 }
 
 // Stops motor
 void motor_stop() {
+  axis = 0;
+  char *ax = ms.GetCapture(inBuffer, 0);
+  get_axis(ax, &axis);
+  if (axis == 0) {
+    printf("Invalid Axis\n");
+    return;
+  }
   //printf("Stopping motor\n");
-  motor.off();
+  motor_off(axis);
+}
+
+void get_axis(char *ax, int8_t *axis) {
+  *axis = 0;
+  if(strcmp(ax,"a") == 0) *axis = 1;
+  if(strcmp(ax,"b") == 0) *axis = 2;
+}
+
+
+float enc_read(int8_t axis) {
+  switch (axis) {
+    case 1:
+      return float(EncA.read());
+      break;
+    case 2:
+      return float(EncB.read());
+      break;
+    default:
+      return 0.0;
+  }
+}
+
+void motor_on(int8_t axis, double Speed) {
+  switch (axis) {
+    case 1:
+      motorA.on(Speed);
+      break;
+    case 2:
+      motorB.on(Speed);
+      break;
+    default:
+      ;
+  }
+}
+
+void motor_off(int8_t axis) {
+  switch (axis) {
+    case 1:
+      motorA.off();
+      break;
+    case 2:
+      motorB.off();
+      break;
+    default:
+      ;
+  }
+}
+
+void controller_start(int8_t axis) {
+  switch (axis) {
+    case 1:
+      ControllerA.start();
+      break;
+    case 2:
+      ControllerB.start();
+      break;
+    default:
+      ;
+  }
+}
+
+void controller_stop(int8_t axis) {
+  switch (axis) {
+    case 1:
+      ControllerA.stop();
+      break;
+    case 2:
+      ControllerB.stop();
+      break;
+    default:
+      ;
+  }
+}
+
+void controller_compute(int8_t axis) {
+  switch (axis) {
+    case 1:
+      ControllerA.compute();
+      break;
+    case 2:
+      ControllerB.compute();
+      break;
+    default:
+      ;
+  }
 }
 
 
