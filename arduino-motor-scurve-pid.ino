@@ -39,23 +39,21 @@ float DEADBAND = 10;
 // Use if multiple motors/encoder/controllers
 int8_t axis; // A= 1; B=2; C=3 etc
 
-
-//Define Variables we'll be connecting to for PID control
-double Setpoint, Input, Output;
-//Specify the links and initial tuning parameters
-double KpA=0.05, KiA=0, KdA=0.005; // 500, 1000, 13 // 1000, 0, 100
-double KpB=0.05, KiB=0, KdB=0.005; // 500, 1000, 13 // 1000, 0, 100
-ArduPID ControllerA;
-ArduPID ControllerB;
-
-//Encoder
-Encoder EncA(21, 20); // Interrupts on Mega
-Encoder EncB(21, 20); // Interrupts on Mega
-
 // Motors
 DCMotor motorA = DCMotor(2, 4, 8); // 2,4 to IN1 and IN2 of L293N and 8 = PWM
 DCMotor motorB = DCMotor(2, 4, 8); // 2,4 to IN1 and IN2 of L293N and 8 = PWM
 
+//Encoder
+Encoder EncA(21, 20); // Interrupts on Mega
+Encoder EncB(19, 18); // Interrupts on Mega
+
+//Define Variables we'll be connecting to for PID control
+double Setpoint, Input, Output;
+//Specify the links and initial tuning parameters
+double KpA=1000.0, KiA=0, KdA=100.0; // 500, 1000, 13 // 1000, 0, 100//0.1,0.0,0.005
+double KpB=0.1, KiB=0, KdB=0.005; // 500, 1000, 13 // 1000, 0, 100
+ArduPID ControllerA;
+ArduPID ControllerB;
 
 // input buffer and RegExp match state for processing client input
 char inBuffer[BUFFER_LENGTH];
